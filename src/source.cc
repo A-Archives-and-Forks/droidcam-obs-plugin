@@ -1343,7 +1343,9 @@ obs_properties_t *source_properties(void *data) {
         OBS_COMBO_FORMAT_STRING);
     for (size_t i = 0; i < ARRAY_LEN(Resolutions); i++) {
         obs_property_list_add_string(cp, Resolutions[i], Resolutions[i]);
+        #if DROIDCAM_OVERRIDE==0
         if (!uhd_unlock && i == RESOLUTION_1080) break;
+        #endif
     }
 
     obs_property_set_modified_callback2(cp, video_parms_changed, data);

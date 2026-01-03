@@ -29,6 +29,7 @@ public slots:
 public:
     QSvgWidget loadingSvg;
     QIcon phoneIcon;
+    QIcon editIcon;
     void *dummy_droidcam_source;
     void *dummy_source_context;
     void *dummy_properties;

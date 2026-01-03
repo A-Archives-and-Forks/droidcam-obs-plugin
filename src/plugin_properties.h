@@ -59,9 +59,12 @@ static const char* Resolutions[] = {
     "1024x768",
     "1280x720",
     "1920x1080",
+    #if DROIDCAM_OVERRIDE
+    #else
     "1920x1440",
     "2560x1440",
     "3840x2160",
+    #endif
 };
 
 #define RESOLUTION_1080 3

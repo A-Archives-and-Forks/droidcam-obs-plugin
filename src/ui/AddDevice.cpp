@@ -34,6 +34,8 @@ inline static void retainSize(QWidget *item) {
 }
 
 AddDevice::AddDevice(QWidget *parent) : QDialog(parent),
+    refresh_count(0),
+    enable_audio(false),
     loadingSvg(this),
     ui(new Ui_AddDeviceDC)
 {
@@ -55,6 +57,12 @@ AddDevice::AddDevice(QWidget *parent) : QDialog(parent),
         bfree(file);
     }
 
+    file = obs_module_file("edit.svg");
+    if (file) {
+        editIcon.addFile(file, QSize(96, 96));
+        bfree(file);
+    }
+
     ui->setupUi(this);
     Qt::WindowFlags flags = windowFlags();
     flags &= ~Qt::WindowContextHelpButtonHint;
@@ -68,8 +76,6 @@ AddDevice::AddDevice(QWidget *parent) : QDialog(parent),
     ui->refresh_button->setVisible(false);
     ui->horizontalLayout1->addWidget(&loadingSvg);
 
-    refresh_count = 0;
-    enable_audio = false;
     ui->enableAudio_checkBox->connect(ui->enableAudio_checkBox,
         &QCheckBox::stateChanged, [=] (int state) {
             enable_audio = state == Qt::Checked;
@@ -78,6 +84,10 @@ AddDevice::AddDevice(QWidget *parent) : QDialog(parent),
     ui->deviceList_widget->connect(ui->deviceList_widget,
         &QListWidget::itemSelectionChanged, [=]() {
             int active = ui->deviceList_widget->currentRow();
+            if (active == (ui->deviceList_widget->count()-1)
+                && !ui->addDevice_button->isVisible())
+                AddDeviceManually();
+
             ui->addDevice_button->setVisible(active >= 0);
         });
 
@@ -153,8 +163,10 @@ void AddDevice::AddDeviceManually() {
     QLineEdit nameInput(&dialog);
     QLineEdit wifiInput(&dialog);
 
-    QString label0 = QString(obs_module_text("Device"));
+    QString label0 = QString(TEXT_DEVICE);
     form.addWidget(new QLabel(label0));
+    nameInput.setText(label0);
+    nameInput.selectAll();
     form.addWidget(&nameInput);
 
     form.addWidget(new QLabel("WiFi IP"));
@@ -179,7 +191,6 @@ void AddDevice::AddDeviceManually() {
 
     dialog.setWindowTitle(QString(obs_module_text("AddADevice")));
     if (dialog.exec() != QDialog::Accepted) {
-        refresh_count --;
         return;
     }
 
@@ -212,7 +223,6 @@ void AddDevice::AddDeviceManually() {
     QListWidgetItem item(phoneIcon, nameInput.text());
     item.setData(Qt::UserRole, QVariant::fromValue((void*)info));
     AddNewDevice(&item);
-
     bfree(info);
     enable_audio = ui->enableAudio_checkBox->checkState() == Qt::Checked;
 }
@@ -221,7 +231,9 @@ void AddDevice::AddListEntry(const char *name, void* data) {
     if (!isVisible())
         return;
 
-    QListWidgetItem *item = new QListWidgetItem(phoneIcon, name, ui->deviceList_widget);
+    QIcon& icon = (strcmp(name, TEXT_USE_WIFI) == 0)
+        ? editIcon : phoneIcon;
+    QListWidgetItem *item = new QListWidgetItem(icon, name, ui->deviceList_widget);
     item->setData(Qt::UserRole, QVariant::fromValue(data));
     QFont font = item->font();
     font.setPointSize(14);
@@ -239,6 +251,7 @@ void AddDevice::ClearList() {
 
 void AddDevice::ReloadList() {
     if (refresh_count > 2) {
+        refresh_count = 2;
         AddDeviceManually();
         return;
     }
@@ -275,19 +288,15 @@ void ReloadThread::run() {
         for (size_t i = 0; i < obs_property_list_item_count(list); i++) {
             const char *name = obs_property_list_item_name(list, i);
             const char *value = obs_property_list_item_string(list, i);
-            if (!(name && value))
-                continue;
 
-            if (strncmp(value, opt_use_wifi, strlen(opt_use_wifi)) == 0)
-                continue;
-
-            auto info = (DeviceInfo *) bzalloc(sizeof(DeviceInfo));
-            info->id = value;
-            info->port = DEFAULT_PORT;
-            info->ip = "";
-            resolve_device_type(info, parent->dummy_source_context);
-            if (info->type != DeviceType::NONE && parent->isVisible())
+            if (name && value && parent->isVisible()) {
+                auto info = (DeviceInfo *) bzalloc(sizeof(DeviceInfo));
+                info->id = value;
+                info->port = DEFAULT_PORT;
+                info->ip = "";
+                resolve_device_type(info, parent->dummy_source_context);
                 emit AddListEntry(name, info);
+            }
         }
     }
 }
@@ -335,6 +344,11 @@ void AddDevice::AddNewDevice(QListWidgetItem *item) {
     QByteArray text = item->text().toUtf8();
     const char* device_name = text.constData();
     ilog("want to add: %s", device_name);
+
+    if (strcmp(device_name, TEXT_USE_WIFI) == 0) {
+        AddDeviceManually();
+        return;
+    }
 
     obs_enum_sources([](void *data, obs_source_t *source) -> bool {
         const char *sid = obs_source_get_id(source);
@@ -386,6 +400,8 @@ void AddDevice::AddNewDevice(QListWidgetItem *item) {
         QString msg = QString(obs_module_text("AlreadyExist")).arg(device_name);
         QMessageBox mb(QMessageBox::Information, title, msg,
             QMessageBox::StandardButtons(QMessageBox::Yes | QMessageBox::No), this);
+        mb.setButtonText(QMessageBox::Yes, QString(obs_module_text("Yes")));
+        mb.setButtonText(QMessageBox::No, QString(obs_module_text("No")));
         mb.setDefaultButton(QMessageBox::No);
 
         if (mb.exec() != QMessageBox::Yes)
@@ -411,6 +427,9 @@ void AddDevice::AddNewDevice(QListWidgetItem *item) {
 }
 
 void AddDevice::AddSourceInternal(DeviceInfo* device_info, const char* device_name) {
+    if (device_info->type == DeviceType::NONE)
+        return;
+
     char resolution[16];
     obs_video_info ovi;
     obs_data_t *settings = obs_data_create();
